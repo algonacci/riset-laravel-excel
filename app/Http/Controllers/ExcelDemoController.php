@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Exports\LaravelCmsUsersExport;
+use App\Exports\LaravelCmsUsersTemplateExport;
 use App\Imports\LaravelCmsUsersImport;
 use Illuminate\Http\Request;
 use Maatwebsite\Excel\Facades\Excel;
@@ -57,19 +58,6 @@ class ExcelDemoController extends Controller
      */
     public function downloadTemplate()
     {
-        return Excel::download(new class implements \Maatwebsite\Excel\Concerns\FromArray, \Maatwebsite\Excel\Concerns\WithHeadings {
-            public function headings(): array
-            {
-                return ['name', 'email', 'password'];
-            }
-
-            public function array(): array
-            {
-                return [
-                    ['John Doe', 'john@example.com', 'password123'],
-                    ['Jane Smith', 'jane@example.com', 'password123'],
-                ];
-            }
-        }, 'laravel_cms_users_template.xlsx');
+        return Excel::download(new LaravelCmsUsersTemplateExport, 'laravel_cms_users_template.xlsx');
     }
 }
