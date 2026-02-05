@@ -10,7 +10,7 @@ use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Forms\Components\FileUpload;
 use Filament\Resources\Pages\ListRecords;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Http\UploadedFile;
 use Maatwebsite\Excel\Facades\Excel;
 
 class ListLaravelCmsUsers extends ListRecords
@@ -31,13 +31,13 @@ class ListLaravelCmsUsers extends ListRecords
                     return Excel::download(new LaravelCmsUsersExport, 'laravel_cms_users_' . now()->format('Y-m-d_H-i-s') . '.xlsx');
                 }),
 
-            // Import Action with Modal - Stateless (Memory)
+            // Import Action with Modal - TRUE STATELESS
             Action::make('import')
                 ->label('Import Excel')
                 ->icon('heroicon-o-arrow-up-tray')
                 ->color('warning')
                 ->modalHeading('Import Data Excel')
-                ->modalDescription('Upload file Excel (.xlsx, .xls) untuk import data. Stateless - file diproses di memory.')
+                ->modalDescription('Upload file Excel (.xlsx, .xls) untuk import data. Stateless - file diproses langsung di memory.')
                 ->modalSubmitActionLabel('Import Data')
                 ->form([
                     FileUpload::make('file')
@@ -45,29 +45,30 @@ class ListLaravelCmsUsers extends ListRecords
                         ->acceptedFileTypes(['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel'])
                         ->maxSize(2048)
                         ->required()
-                        ->helperText('Format: .xlsx, .xls (Max 2MB). File diproses langsung di memory tanpa disimpan ke disk.')
-                        ->disk('local') // Simpan temporary di local disk
-                        ->directory('temp-imports')
-                        ->visibility('private'),
+                        ->helperText('Format: .xlsx, .xls (Max 2MB). Stateless - tidak disimpan ke disk.')
+                        ->storeFiles(false), // JANGAN simpan ke disk!
                 ])
                 ->action(function (array $data) {
-                    // FileUpload returns array of file paths
-                    $filePath = is_array($data['file']) ? $data['file'][0] : $data['file'];
-                    
                     try {
-                        // Gunakan Storage facade untuk baca file
-                        $fullPath = Storage::disk('local')->path($filePath);
+                        // Ambil file dari state (temporary file di memory)
+                        $fileState = $data['file'];
                         
-                        // Debug: Cek apakah file ada
-                        if (!file_exists($fullPath)) {
-                            throw new \Exception('File tidak ditemukan di path: ' . $fullPath);
+                        // FileUpload dengan storeFiles(false) akan return path ke temporary file
+                        if (is_array($fileState)) {
+                            $fileState = $fileState[0];
                         }
                         
-                        // Import langsung dari file temporary
-                        Excel::import(new LaravelCmsUsersImport, $fullPath);
+                        // Buat UploadedFile instance dari temporary file
+                        $uploadedFile = new UploadedFile(
+                            $fileState,
+                            'import.xlsx',
+                            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                            null,
+                            true // test mode = true (file sudah valid)
+                        );
                         
-                        // Hapus file temporary setelah import
-                        Storage::disk('local')->delete($filePath);
+                        // Import langsung dari UploadedFile (stateless - tidak simpan ke disk)
+                        Excel::import(new LaravelCmsUsersImport, $uploadedFile);
                         
                         // Notifikasi sukses
                         \Filament\Notifications\Notification::make()
@@ -77,11 +78,6 @@ class ListLaravelCmsUsers extends ListRecords
                             ->send();
                             
                     } catch (\Maatwebsite\Excel\Validators\ValidationException $e) {
-                        // Cleanup file temporary
-                        if (isset($filePath)) {
-                            Storage::disk('local')->delete($filePath);
-                        }
-                        
                         $failures = $e->failures();
                         $errors = [];
                         
@@ -91,17 +87,12 @@ class ListLaravelCmsUsers extends ListRecords
                         
                         \Filament\Notifications\Notification::make()
                             ->title('Import Gagal')
-                            ->body(implode(', ', array_slice($errors, 0, 5))) // Max 5 errors
+                            ->body(implode(', ', array_slice($errors, 0, 5)))
                             ->danger()
                             ->persistent()
                             ->send();
                             
                     } catch (\Exception $e) {
-                        // Cleanup file temporary
-                        if (isset($filePath)) {
-                            Storage::disk('local')->delete($filePath);
-                        }
-                        
                         \Filament\Notifications\Notification::make()
                             ->title('Import Gagal')
                             ->body('Terjadi kesalahan: ' . $e->getMessage())
