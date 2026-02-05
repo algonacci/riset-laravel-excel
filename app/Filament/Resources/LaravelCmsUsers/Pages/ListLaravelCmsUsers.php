@@ -10,10 +10,6 @@ use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Forms\Components\FileUpload;
 use Filament\Resources\Pages\ListRecords;
-use Filament\Schemas\Components\Actions;
-use Filament\Schemas\Components\Form;
-use Filament\Schemas\Components\Group;
-use Filament\Schemas\Components\Text;
 use Maatwebsite\Excel\Facades\Excel;
 
 class ListLaravelCmsUsers extends ListRecords
@@ -34,13 +30,13 @@ class ListLaravelCmsUsers extends ListRecords
                     return Excel::download(new LaravelCmsUsersExport, 'laravel_cms_users_' . now()->format('Y-m-d_H-i-s') . '.xlsx');
                 }),
 
-            // Import Action with Modal
+            // Import Action with Modal - Stateless (Memory)
             Action::make('import')
                 ->label('Import Excel')
                 ->icon('heroicon-o-arrow-up-tray')
                 ->color('warning')
                 ->modalHeading('Import Data Excel')
-                ->modalDescription('Upload file Excel (.xlsx, .xls) untuk import data Laravel CMS Users.')
+                ->modalDescription('Upload file Excel (.xlsx, .xls) untuk import data. Stateless - file diproses di memory.')
                 ->modalSubmitActionLabel('Import Data')
                 ->form([
                     FileUpload::make('file')
@@ -48,25 +44,38 @@ class ListLaravelCmsUsers extends ListRecords
                         ->acceptedFileTypes(['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel'])
                         ->maxSize(2048)
                         ->required()
-                        ->helperText('Format yang didukung: .xlsx, .xls (Max 2MB)'),
+                        ->helperText('Format: .xlsx, .xls (Max 2MB). File diproses langsung di memory tanpa disimpan ke disk.')
+                        ->disk('local') // Simpan temporary di local disk
+                        ->directory('temp-imports'),
                 ])
                 ->action(function (array $data) {
-                    $file = $data['file'];
+                    $filePath = $data['file'];
                     
                     try {
-                        Excel::import(new LaravelCmsUsersImport, storage_path('app/public/' . $file));
+                        // Baca file dari storage temporary
+                        $fullPath = storage_path('app/' . $filePath);
                         
-                        // Delete temporary file after import
-                        unlink(storage_path('app/public/' . $file));
+                        // Import langsung dari file temporary
+                        Excel::import(new LaravelCmsUsersImport, $fullPath);
                         
-                        // Show Filament notification
+                        // Hapus file temporary setelah import
+                        if (file_exists($fullPath)) {
+                            unlink($fullPath);
+                        }
+                        
+                        // Notifikasi sukses
                         \Filament\Notifications\Notification::make()
                             ->title('Import Berhasil')
                             ->body('Data Laravel CMS Users berhasil diimport!')
                             ->success()
                             ->send();
+                            
                     } catch (\Maatwebsite\Excel\Validators\ValidationException $e) {
-                        unlink(storage_path('app/public/' . $file));
+                        // Cleanup file temporary
+                        $fullPath = storage_path('app/' . $filePath);
+                        if (file_exists($fullPath)) {
+                            unlink($fullPath);
+                        }
                         
                         $failures = $e->failures();
                         $errors = [];
@@ -77,18 +86,23 @@ class ListLaravelCmsUsers extends ListRecords
                         
                         \Filament\Notifications\Notification::make()
                             ->title('Import Gagal')
-                            ->body(implode(', ', $errors))
+                            ->body(implode(', ', array_slice($errors, 0, 5))) // Max 5 errors
                             ->danger()
+                            ->persistent()
                             ->send();
+                            
                     } catch (\Exception $e) {
-                        if (file_exists(storage_path('app/public/' . $file))) {
-                            unlink(storage_path('app/public/' . $file));
+                        // Cleanup file temporary
+                        $fullPath = storage_path('app/' . $filePath);
+                        if (file_exists($fullPath)) {
+                            unlink($fullPath);
                         }
                         
                         \Filament\Notifications\Notification::make()
                             ->title('Import Gagal')
                             ->body('Terjadi kesalahan: ' . $e->getMessage())
                             ->danger()
+                            ->persistent()
                             ->send();
                     }
                 }),
