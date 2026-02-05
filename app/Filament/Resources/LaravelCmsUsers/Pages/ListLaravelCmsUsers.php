@@ -10,8 +10,9 @@ use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Forms\Components\FileUpload;
 use Filament\Resources\Pages\ListRecords;
-use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Maatwebsite\Excel\Facades\Excel;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 
 class ListLaravelCmsUsers extends ListRecords
 {
@@ -31,71 +32,86 @@ class ListLaravelCmsUsers extends ListRecords
                     return Excel::download(new LaravelCmsUsersExport, 'laravel_cms_users_' . now()->format('Y-m-d_H-i-s') . '.xlsx');
                 }),
 
-            // Import Action with Modal - TRUE STATELESS
+            // Import Action with Modal
             Action::make('import')
                 ->label('Import Excel')
                 ->icon('heroicon-o-arrow-up-tray')
                 ->color('warning')
                 ->modalHeading('Import Data Excel')
-                ->modalDescription('Upload file Excel (.xlsx, .xls) untuk import data. Stateless - file diproses langsung di memory.')
+                ->modalDescription('Upload file Excel (.xlsx, .xls) untuk import data.')
                 ->modalSubmitActionLabel('Import Data')
                 ->form([
                     FileUpload::make('file')
                         ->label('File Excel')
-                        ->acceptedFileTypes(['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel'])
+                        ->acceptedFileTypes([
+                            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                            'application/vnd.ms-excel'
+                        ])
                         ->maxSize(2048)
                         ->required()
-                        ->helperText('Format: .xlsx, .xls (Max 2MB). Stateless - tidak disimpan ke disk.')
-                        ->storeFiles(false), // JANGAN simpan ke disk!
+                        ->helperText('Format: .xlsx, .xls (Max 2MB)')
+                        ->disk('local')
+                        ->directory('tmp'),
                 ])
                 ->action(function (array $data) {
+                    $filePath = null;
+                    
                     try {
-                        // Ambil file dari state (temporary file di memory)
-                        $fileState = $data['file'];
+                        // Get file path from FileUpload component
+                        $filePath = is_array($data['file']) ? $data['file'][0] : $data['file'];
                         
-                        // FileUpload dengan storeFiles(false) akan return path ke temporary file
-                        if (is_array($fileState)) {
-                            $fileState = $fileState[0];
+                        // Get the full storage path
+                        $storagePath = Storage::disk('local')->path($filePath);
+                        
+                        // Check if file exists in storage
+                        if (!Storage::disk('local')->exists($filePath)) {
+                            throw new \Exception('File tidak ditemukan di storage: ' . $filePath);
                         }
                         
-                        // Buat UploadedFile instance dari temporary file
-                        $uploadedFile = new UploadedFile(
-                            $fileState,
-                            'import.xlsx',
-                            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                            null,
-                            true // test mode = true (file sudah valid)
+                        // Create a temporary uploaded file for Excel import
+                        $tempFile = new TemporaryUploadedFile(
+                            $storagePath,
+                            'local'
                         );
                         
-                        // Import langsung dari UploadedFile (stateless - tidak simpan ke disk)
-                        Excel::import(new LaravelCmsUsersImport, $uploadedFile);
+                        // Import using Laravel Excel
+                        Excel::import(new LaravelCmsUsersImport, $tempFile);
                         
-                        // Notifikasi sukses
+                        // Delete the temporary file
+                        Storage::disk('local')->delete($filePath);
+                        
+                        // Success notification
                         \Filament\Notifications\Notification::make()
                             ->title('Import Berhasil')
-                            ->body('Data Laravel CMS Users berhasil diimport!')
+                            ->body('Data berhasil diimport!')
                             ->success()
                             ->send();
                             
                     } catch (\Maatwebsite\Excel\Validators\ValidationException $e) {
-                        $failures = $e->failures();
-                        $errors = [];
+                        if ($filePath) {
+                            Storage::disk('local')->delete($filePath);
+                        }
                         
-                        foreach ($failures as $failure) {
-                            $errors[] = 'Row ' . $failure->row() . ': ' . implode(', ', $failure->errors());
+                        $errors = [];
+                        foreach ($e->failures() as $failure) {
+                            $errors[] = 'Baris ' . $failure->row() . ': ' . implode(', ', $failure->errors());
                         }
                         
                         \Filament\Notifications\Notification::make()
-                            ->title('Import Gagal')
-                            ->body(implode(', ', array_slice($errors, 0, 5)))
+                            ->title('Validasi Gagal')
+                            ->body(implode('<br>', array_slice($errors, 0, 3)))
                             ->danger()
                             ->persistent()
                             ->send();
                             
                     } catch (\Exception $e) {
+                        if ($filePath) {
+                            Storage::disk('local')->delete($filePath);
+                        }
+                        
                         \Filament\Notifications\Notification::make()
                             ->title('Import Gagal')
-                            ->body('Terjadi kesalahan: ' . $e->getMessage())
+                            ->body($e->getMessage())
                             ->danger()
                             ->persistent()
                             ->send();
