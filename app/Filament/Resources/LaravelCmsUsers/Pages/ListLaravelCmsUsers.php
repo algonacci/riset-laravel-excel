@@ -20,7 +20,8 @@ class ListLaravelCmsUsers extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
-            CreateAction::make(),
+            CreateAction::make()
+                ->label('Buat CMS User Baru'),
 
             // Export Action
             Action::make('export')
