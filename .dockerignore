@@ -1,0 +1,30 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+
+# Dependencies
+node_modules
+vendor
+
+# Logs
+storage/logs/*.log
+bootstrap/cache/*.php
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Docker
+docker-compose.override.yml
+
+# Misc
+*.log
+*.md
+.DS_Store
+Thumbs.db
