@@ -11,6 +11,11 @@ class EditLaravelCmsUser extends EditRecord
 {
     protected static string $resource = LaravelCmsUserResource::class;
 
+    public function getTitle(): string
+    {
+        return 'Edit CMS User';
+    }
+
     protected function getHeaderActions(): array
     {
         return [

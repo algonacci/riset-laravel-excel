@@ -10,6 +10,11 @@ class ViewLaravelCmsUser extends ViewRecord
 {
     protected static string $resource = LaravelCmsUserResource::class;
 
+    public function getTitle(): string
+    {
+        return 'Detail CMS User';
+    }
+
     protected function getHeaderActions(): array
     {
         return [
