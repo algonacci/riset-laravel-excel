@@ -10,6 +10,7 @@ use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Forms\Components\FileUpload;
 use Filament\Resources\Pages\ListRecords;
+use Illuminate\Support\Facades\Storage;
 use Maatwebsite\Excel\Facades\Excel;
 
 class ListLaravelCmsUsers extends ListRecords
@@ -46,22 +47,27 @@ class ListLaravelCmsUsers extends ListRecords
                         ->required()
                         ->helperText('Format: .xlsx, .xls (Max 2MB). File diproses langsung di memory tanpa disimpan ke disk.')
                         ->disk('local') // Simpan temporary di local disk
-                        ->directory('temp-imports'),
+                        ->directory('temp-imports')
+                        ->visibility('private'),
                 ])
                 ->action(function (array $data) {
-                    $filePath = $data['file'];
+                    // FileUpload returns array of file paths
+                    $filePath = is_array($data['file']) ? $data['file'][0] : $data['file'];
                     
                     try {
-                        // Baca file dari storage temporary
-                        $fullPath = storage_path('app/' . $filePath);
+                        // Gunakan Storage facade untuk baca file
+                        $fullPath = Storage::disk('local')->path($filePath);
+                        
+                        // Debug: Cek apakah file ada
+                        if (!file_exists($fullPath)) {
+                            throw new \Exception('File tidak ditemukan di path: ' . $fullPath);
+                        }
                         
                         // Import langsung dari file temporary
                         Excel::import(new LaravelCmsUsersImport, $fullPath);
                         
                         // Hapus file temporary setelah import
-                        if (file_exists($fullPath)) {
-                            unlink($fullPath);
-                        }
+                        Storage::disk('local')->delete($filePath);
                         
                         // Notifikasi sukses
                         \Filament\Notifications\Notification::make()
@@ -72,9 +78,8 @@ class ListLaravelCmsUsers extends ListRecords
                             
                     } catch (\Maatwebsite\Excel\Validators\ValidationException $e) {
                         // Cleanup file temporary
-                        $fullPath = storage_path('app/' . $filePath);
-                        if (file_exists($fullPath)) {
-                            unlink($fullPath);
+                        if (isset($filePath)) {
+                            Storage::disk('local')->delete($filePath);
                         }
                         
                         $failures = $e->failures();
@@ -93,9 +98,8 @@ class ListLaravelCmsUsers extends ListRecords
                             
                     } catch (\Exception $e) {
                         // Cleanup file temporary
-                        $fullPath = storage_path('app/' . $filePath);
-                        if (file_exists($fullPath)) {
-                            unlink($fullPath);
+                        if (isset($filePath)) {
+                            Storage::disk('local')->delete($filePath);
                         }
                         
                         \Filament\Notifications\Notification::make()
