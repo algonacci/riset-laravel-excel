@@ -12,7 +12,6 @@ use Filament\Forms\Components\FileUpload;
 use Filament\Resources\Pages\ListRecords;
 use Illuminate\Support\Facades\Storage;
 use Maatwebsite\Excel\Facades\Excel;
-use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 
 class ListLaravelCmsUsers extends ListRecords
 {
@@ -54,31 +53,18 @@ class ListLaravelCmsUsers extends ListRecords
                         ->directory('tmp'),
                 ])
                 ->action(function (array $data) {
-                    $filePath = null;
+                    $storedFilePath = null;
                     
                     try {
-                        // Get file path from FileUpload component
-                        $filePath = is_array($data['file']) ? $data['file'][0] : $data['file'];
+                        // Get stored file path (FileUpload stores as array)
+                        $storedFilePath = is_array($data['file']) ? $data['file'][0] : $data['file'];
                         
-                        // Get the full storage path
-                        $storagePath = Storage::disk('local')->path($filePath);
+                        // Import directly from storage using disk path
+                        // Laravel Excel can read from storage disk directly
+                        Excel::import(new LaravelCmsUsersImport, $storedFilePath, 'local');
                         
-                        // Check if file exists in storage
-                        if (!Storage::disk('local')->exists($filePath)) {
-                            throw new \Exception('File tidak ditemukan di storage: ' . $filePath);
-                        }
-                        
-                        // Create a temporary uploaded file for Excel import
-                        $tempFile = new TemporaryUploadedFile(
-                            $storagePath,
-                            'local'
-                        );
-                        
-                        // Import using Laravel Excel
-                        Excel::import(new LaravelCmsUsersImport, $tempFile);
-                        
-                        // Delete the temporary file
-                        Storage::disk('local')->delete($filePath);
+                        // Delete the stored file after import
+                        Storage::disk('local')->delete($storedFilePath);
                         
                         // Success notification
                         \Filament\Notifications\Notification::make()
@@ -88,8 +74,9 @@ class ListLaravelCmsUsers extends ListRecords
                             ->send();
                             
                     } catch (\Maatwebsite\Excel\Validators\ValidationException $e) {
-                        if ($filePath) {
-                            Storage::disk('local')->delete($filePath);
+                        // Cleanup on validation error
+                        if ($storedFilePath && Storage::disk('local')->exists($storedFilePath)) {
+                            Storage::disk('local')->delete($storedFilePath);
                         }
                         
                         $errors = [];
@@ -99,14 +86,15 @@ class ListLaravelCmsUsers extends ListRecords
                         
                         \Filament\Notifications\Notification::make()
                             ->title('Validasi Gagal')
-                            ->body(implode('<br>', array_slice($errors, 0, 3)))
+                            ->body(implode('<br>', array_slice($errors, 0, 5)))
                             ->danger()
                             ->persistent()
                             ->send();
                             
                     } catch (\Exception $e) {
-                        if ($filePath) {
-                            Storage::disk('local')->delete($filePath);
+                        // Cleanup on error
+                        if ($storedFilePath && Storage::disk('local')->exists($storedFilePath)) {
+                            Storage::disk('local')->delete($storedFilePath);
                         }
                         
                         \Filament\Notifications\Notification::make()
